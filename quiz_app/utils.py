@@ -7,8 +7,11 @@ from urllib.parse import parse_qs, urlparse
 import whisper
 import yt_dlp
 from django.conf import settings
+from django.db import transaction
 from google import genai
 from google.genai import errors as genai_errors
+
+from quiz_app.models import Question, Quiz
 
 VIDEO_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{11}$')
 YOUTUBE_HOSTS = {'youtube.com', 'www.youtube.com', 'm.youtube.com'}
@@ -18,6 +21,7 @@ WHISPER_MODEL = 'base'
 GEMINI_MODEL = 'gemini-3.8-flash'
 QUESTION_COUNT = 10
 OPTION_COUNT = 4
+MAX_TEXT_LENGTH = 255  # max_length of Quiz.title / Question.answer
 
 QUIZ_PROMPT = (
     'Based on the following transcript, generate a quiz in valid JSON '
@@ -61,7 +65,7 @@ def extract_video_id(url):
     if parsed.scheme not in ('http', 'https'):
         return None
     candidate = find_id_candidate(parsed)
-    if candidate and VIDEO_ID_PATTERN.match(candidate):
+    if candidate and VIDEO_ID_PATTERN.fullmatch(candidate):
         return candidate
     return None
 
@@ -151,8 +155,11 @@ def parse_quiz_data(raw_text):
 
 def validate_quiz(data):
     """Check the quiz has a title and exactly ten valid questions."""
-    if not isinstance(data, dict) or not data.get('title'):
-        raise QuizGenerationError('Quiz title is missing.')
+    if not isinstance(data, dict) or not is_text(data.get('title'),
+                                                 MAX_TEXT_LENGTH):
+        raise QuizGenerationError('Quiz title is missing or too long.')
+    if not isinstance(data.get('description', ''), str):
+        raise QuizGenerationError('Quiz description must be text.')
     questions = data.get('questions')
     if not isinstance(questions, list) or len(questions) != QUESTION_COUNT:
         raise QuizGenerationError('Quiz must have exactly 10 questions.')
@@ -162,13 +169,23 @@ def validate_quiz(data):
 
 def validate_question(question):
     """Check a question has a title, four distinct options and an answer."""
-    if not isinstance(question, dict) or not question.get('question_title'):
+    if not isinstance(question, dict):
+        raise QuizGenerationError('Question must be an object.')
+    if not is_text(question.get('question_title')):
         raise QuizGenerationError('Question title is missing.')
     options = question.get('question_options')
     if not has_distinct_options(options):
         raise QuizGenerationError('Question needs 4 distinct options.')
-    if question.get('answer') not in options:
-        raise QuizGenerationError('Answer is not one of the options.')
+    answer = question.get('answer')
+    if not is_text(answer, MAX_TEXT_LENGTH) or answer not in options:
+        raise QuizGenerationError('Answer is not a valid option.')
+
+
+def is_text(value, max_length=None):
+    """Return True for a non-blank string within an optional length."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return max_length is None or len(value) <= max_length
 
 
 def has_distinct_options(options):
@@ -183,4 +200,36 @@ def has_distinct_options(options):
 
 def generate_quiz_data(transcript):
     """Generate validated quiz data for a transcript with Gemini."""
+    if not transcript.strip():
+        raise QuizGenerationError('Transcript is empty.')
     return parse_quiz_data(request_quiz_text(build_prompt(transcript)))
+
+
+def generate_quiz_from_video(video_url):
+    """Run the full pipeline from a video URL to validated quiz data."""
+    return generate_quiz_data(get_transcript(video_url))
+
+
+@transaction.atomic
+def create_quiz(user, video_url, quiz_data):
+    """Save a generated quiz and its questions in one transaction."""
+    quiz = Quiz.objects.create(
+        user=user,
+        video_url=video_url,
+        title=quiz_data['title'],
+        description=quiz_data['description'],
+    )
+    Question.objects.bulk_create(
+        build_question(quiz, item) for item in quiz_data['questions']
+    )
+    return quiz
+
+
+def build_question(quiz, item):
+    """Build an unsaved Question from one generated question item."""
+    return Question(
+        quiz=quiz,
+        question_title=item['question_title'],
+        question_options=item['question_options'],
+        answer=item['answer'],
+    )
