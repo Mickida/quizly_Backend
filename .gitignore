@@ -1,0 +1,12 @@
+venv/
+.vscode/
+db.sqlite3*
+__pycache__/
+*.pyc
+.env
+htmlcov/
+.coverage
+
+# Own tests
+*/tests/
+*/api/tests.py
