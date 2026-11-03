@@ -19,6 +19,7 @@ class Quiz(models.Model):
         verbose_name_plural = 'quizzes'
 
     def __str__(self):
+        """Return the quiz title for the admin."""
         return self.title
 
 
@@ -38,4 +39,5 @@ class Question(models.Model):
         ordering = ['id']
 
     def __str__(self):
+        """Return the question text for the admin."""
         return self.question_title
