@@ -33,7 +33,6 @@ REFRESH_ERRORS = (
 
 class RegistrationView(APIView):
     """Register a new user account."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
 
@@ -50,7 +49,6 @@ class RegistrationView(APIView):
 
 class LoginView(APIView):
     """Log a user in and set the JWT cookies."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
 
@@ -81,7 +79,6 @@ class LoginView(APIView):
 
 class CookieTokenRefreshView(APIView):
     """Issue a new access token from the refresh_token cookie."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
 
@@ -111,7 +108,6 @@ class CookieTokenRefreshView(APIView):
 
 class LogoutView(APIView):
     """Log the user out and invalidate the refresh token."""
-
     def post(self, request):
         """Blacklist the refresh token and delete both cookies."""
         blacklist_refresh_token(request.COOKIES.get(REFRESH_COOKIE))

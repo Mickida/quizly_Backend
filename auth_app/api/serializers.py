@@ -4,7 +4,6 @@ from rest_framework import serializers
 
 class RegistrationSerializer(serializers.ModelSerializer):
     """Validate sign-up data and create a new user account."""
-
     confirmed_password = serializers.CharField(write_only=True)
 
     class Meta:
@@ -38,14 +37,12 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
 class LoginSerializer(serializers.Serializer):
     """Validate the presence of login credentials."""
-
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Public representation of a user returned after login."""
-
     class Meta:
         model = User
         fields = ['id', 'username', 'email']

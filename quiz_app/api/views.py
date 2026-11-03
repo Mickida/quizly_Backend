@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 class QuizListView(generics.ListCreateAPIView):
     """List the user's quizzes or create a new one from a YouTube URL."""
-
     serializer_class = QuizSerializer
     permission_classes = [IsAuthenticated]
 
@@ -64,7 +63,6 @@ class QuizListView(generics.ListCreateAPIView):
 
 class QuizDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, partially update or delete one quiz of its owner."""
-
     queryset = Quiz.objects.prefetch_related('questions')
     serializer_class = QuizSerializer
     permission_classes = [IsAuthenticated, IsQuizOwner]

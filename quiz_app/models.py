@@ -4,7 +4,6 @@ from django.db import models
 
 class Quiz(models.Model):
     """A quiz generated from a YouTube video for one user."""
-
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='quizzes'
     )
@@ -25,7 +24,6 @@ class Quiz(models.Model):
 
 class Question(models.Model):
     """A multiple-choice question with four options and one answer."""
-
     quiz = models.ForeignKey(
         Quiz, on_delete=models.CASCADE, related_name='questions'
     )

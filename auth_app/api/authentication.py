@@ -5,7 +5,6 @@ from auth_app.utils import ACCESS_COOKIE
 
 class CookieJWTAuthentication(JWTAuthentication):
     """Authenticate requests with the JWT from the access_token cookie."""
-
     def authenticate(self, request):
         """Return (user, token) from the cookie, or None if it is absent."""
         raw_token = request.COOKIES.get(ACCESS_COOKIE)

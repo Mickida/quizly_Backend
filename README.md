@@ -15,25 +15,58 @@ Django REST Framework.
 
 ## Setup
 
+1. Clone the repository:
+
 ```bash
 git clone <repository-url>
+```
+
+2. Change into the project folder:
+
+```bash
 cd quizly_Backend
+```
+
+3. Create a virtual environment:
+
+```bash
 python -m venv venv
-venv\Scripts\activate          # macOS / Linux: source venv/bin/activate
+```
+
+4. Activate it on Windows:
+
+```bash
+venv\Scripts\activate
+```
+
+   or on macOS / Linux:
+
+```bash
+source venv/bin/activate
+```
+
+5. Install the dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and fill in both values. A secret key can
-be generated with:
+6. Copy `.env.example` to `.env` and fill in both values. A secret key
+   can be generated with:
 
 ```bash
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-Then set up the database and start the server:
+7. Create the database tables:
 
 ```bash
 python manage.py migrate
+```
+
+8. Start the server:
+
+```bash
 python manage.py runserver
 ```
 
