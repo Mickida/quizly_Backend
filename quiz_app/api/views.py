@@ -3,7 +3,7 @@ import logging
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from yt_dlp.utils import DownloadError
+from yt_dlp.utils import YoutubeDLError
 
 from quiz_app.api.permissions import IsQuizOwner
 from quiz_app.api.serializers import (
@@ -49,7 +49,7 @@ class QuizListView(generics.ListCreateAPIView):
         """Return (quiz_data, None) or (None, error_response)."""
         try:
             return generate_quiz_from_video(video_url), None
-        except DownloadError:
+        except YoutubeDLError:
             return None, Response(
                 {'detail': 'Video could not be downloaded.'},
                 status=status.HTTP_400_BAD_REQUEST,

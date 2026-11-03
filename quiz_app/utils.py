@@ -1,15 +1,19 @@
+import functools
 import json
 import os
 import re
 import tempfile
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 import whisper
 import yt_dlp
 from django.conf import settings
 from django.db import transaction
 from google import genai
 from google.genai import errors as genai_errors
+from google.genai import types as genai_types
+from yt_dlp.utils import YoutubeDLError
 
 from quiz_app.models import Question, Quiz
 
@@ -19,6 +23,10 @@ SHORT_LINK_HOSTS = {'youtu.be', 'www.youtu.be'}
 PATH_PREFIXES = ('/shorts/', '/embed/', '/live/')
 WHISPER_MODEL = 'base'
 GEMINI_MODEL = 'gemini-3.5-flash'
+GEMINI_TIMEOUT_MS = 60_000
+GEMINI_RETRY_ATTEMPTS = 3
+GEMINI_RETRY_CODES = [429, 503]  # rate limit, overloaded
+MAX_VIDEO_SECONDS = 15 * 60  # longer videos block the request too long
 QUESTION_COUNT = 10
 OPTION_COUNT = 4
 MAX_TEXT_LENGTH = 255  # max_length of Quiz.title / Question.answer
@@ -57,6 +65,10 @@ QUIZ_PROMPT = (
 
 class QuizGenerationError(Exception):
     """Raised when no valid quiz can be generated from a transcript."""
+
+
+class VideoRejectedError(YoutubeDLError):
+    """Raised for livestreams and videos longer than the allowed limit."""
 
 
 def extract_video_id(url):
@@ -99,13 +111,31 @@ def download_audio(video_url, target_dir):
         'noplaylist': True,
     }
     with yt_dlp.YoutubeDL(options) as ydl:
-        info = ydl.extract_info(video_url, download=True)
+        info = ydl.extract_info(video_url, download=False)
+        check_video_info(info)
+        info = ydl.process_ie_result(info, download=True)
         return ydl.prepare_filename(info)
+
+
+def check_video_info(info):
+    """Reject livestreams and videos without or above the length limit."""
+    duration = info.get('duration')
+    if info.get('is_live') or duration is None:
+        raise VideoRejectedError('Livestreams are not supported.')
+    if duration > MAX_VIDEO_SECONDS:
+        minutes = MAX_VIDEO_SECONDS // 60
+        raise VideoRejectedError(f'Video is longer than {minutes} minutes.')
+
+
+@functools.lru_cache(maxsize=1)
+def load_whisper_model():
+    """Load the Whisper model once and reuse it for later requests."""
+    return whisper.load_model(WHISPER_MODEL)
 
 
 def transcribe_audio(audio_path):
     """Transcribe an audio file to text with Whisper."""
-    model = whisper.load_model(WHISPER_MODEL)
+    model = load_whisper_model()
     result = model.transcribe(audio_path, fp16=False)
     return result['text'].strip()
 
@@ -122,14 +152,25 @@ def build_prompt(transcript):
     return QUIZ_PROMPT.format(transcript=transcript)
 
 
+def build_gemini_client():
+    """Return a Gemini client with a timeout and retries on overload."""
+    retry = genai_types.HttpRetryOptions(
+        attempts=GEMINI_RETRY_ATTEMPTS, http_status_codes=GEMINI_RETRY_CODES
+    )
+    options = genai_types.HttpOptions(
+        timeout=GEMINI_TIMEOUT_MS, retry_options=retry
+    )
+    return genai.Client(api_key=settings.GEMINI_API_KEY, http_options=options)
+
+
 def request_quiz_text(prompt):
     """Send the prompt to Gemini and return the raw response text."""
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    client = build_gemini_client()
     try:
         response = client.models.generate_content(
             model=GEMINI_MODEL, contents=prompt
         )
-    except genai_errors.APIError as error:
+    except (genai_errors.APIError, httpx.HTTPError) as error:
         raise QuizGenerationError('Gemini request failed.') from error
     if not response.text:
         raise QuizGenerationError('Gemini returned an empty response.')
