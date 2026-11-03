@@ -51,7 +51,8 @@ The API runs at `http://127.0.0.1:8000/api/`.
   HTTP locally. Enable it when serving over HTTPS.
 - Creating a quiz runs synchronously and can take a few minutes. The
   first run also downloads the Whisper `base` model (about 140 MB).
-- Only YouTube URLs are accepted. Audio files are stored in a temporary
+- Only YouTube URLs are accepted (`youtube.com/watch?v=<id>` and
+  `youtu.be/<id>`). Audio files are stored in a temporary
   folder and deleted afterwards.
 - yt-dlp may warn that no JavaScript runtime was found. Downloads still
   work; if YouTube downloads start failing, install

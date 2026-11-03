@@ -13,14 +13,14 @@ from django.db import transaction
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from yt_dlp.utils import YoutubeDLError
+from yt_dlp.utils import DownloadError
 
 from quiz_app.models import Question, Quiz
 
-VIDEO_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{11}$')
 YOUTUBE_HOSTS = {'youtube.com', 'www.youtube.com', 'm.youtube.com'}
-SHORT_LINK_HOSTS = {'youtu.be', 'www.youtu.be'}
-PATH_PREFIXES = ('/shorts/', '/embed/', '/live/')
+SHORT_LINK_HOST = 'youtu.be'
+VIDEO_ID_LENGTH = 11
+VIDEO_ID_EXTRA_CHARS = '-_'  # allowed besides letters and digits
 WHISPER_MODEL = 'base'
 GEMINI_MODEL = 'gemini-3.5-flash'
 GEMINI_TIMEOUT_MS = 60_000
@@ -67,34 +67,28 @@ class QuizGenerationError(Exception):
     """Raised when no valid quiz can be generated from a transcript."""
 
 
-class VideoRejectedError(YoutubeDLError):
-    """Raised for livestreams and videos longer than the allowed limit."""
-
-
 def extract_video_id(url):
-    """Return the video ID of a YouTube URL, or None if there is none."""
+    """Return the video ID of a YouTube URL, or None if there is none.
+
+    Supported: youtube.com/watch?v=<id> and youtu.be/<id>.
+    """
     parsed = urlparse(url.strip())
-    if parsed.scheme not in ('http', 'https'):
-        return None
-    candidate = find_id_candidate(parsed)
-    if candidate and VIDEO_ID_PATTERN.fullmatch(candidate):
-        return candidate
-    return None
-
-
-def find_id_candidate(parsed):
-    """Return the part of a parsed YouTube URL that holds the ID."""
     host = (parsed.hostname or '').lower()
-    if host in SHORT_LINK_HOSTS:
-        return parsed.path.strip('/').split('/')[0]
-    if host not in YOUTUBE_HOSTS:
-        return None
-    if parsed.path == '/watch':
-        return parse_qs(parsed.query).get('v', [None])[0]
-    for prefix in PATH_PREFIXES:
-        if parsed.path.startswith(prefix):
-            return parsed.path[len(prefix):].split('/')[0]
+    video_id = None
+    if host in YOUTUBE_HOSTS and parsed.path == '/watch':
+        video_id = parse_qs(parsed.query).get('v', [''])[0]
+    elif host == SHORT_LINK_HOST:
+        video_id = parsed.path.strip('/')
+    if parsed.scheme in ('http', 'https') and is_video_id(video_id):
+        return video_id
     return None
+
+
+def is_video_id(value):
+    """Return True if value looks like an 11 character YouTube ID."""
+    if not value or len(value) != VIDEO_ID_LENGTH:
+        return False
+    return all(c.isalnum() or c in VIDEO_ID_EXTRA_CHARS for c in value)
 
 
 def build_watch_url(video_id):
@@ -113,7 +107,7 @@ def download_audio(video_url, target_dir):
     with yt_dlp.YoutubeDL(options) as ydl:
         info = ydl.extract_info(video_url, download=False)
         check_video_info(info)
-        info = ydl.process_ie_result(info, download=True)
+        ydl.download([video_url])
         return ydl.prepare_filename(info)
 
 
@@ -121,10 +115,9 @@ def check_video_info(info):
     """Reject livestreams and videos without or above the length limit."""
     duration = info.get('duration')
     if info.get('is_live') or duration is None:
-        raise VideoRejectedError('Livestreams are not supported.')
+        raise DownloadError('Livestreams are not supported.')
     if duration > MAX_VIDEO_SECONDS:
-        minutes = MAX_VIDEO_SECONDS // 60
-        raise VideoRejectedError(f'Video is longer than {minutes} minutes.')
+        raise DownloadError('Video is too long.')
 
 
 @functools.lru_cache(maxsize=1)
@@ -154,9 +147,11 @@ def build_prompt(transcript):
 
 def build_gemini_client():
     """Return a Gemini client with a timeout and retries on overload."""
+    # Repeat the request up to 3 times if Gemini answers 429 or 503.
     retry = genai_types.HttpRetryOptions(
         attempts=GEMINI_RETRY_ATTEMPTS, http_status_codes=GEMINI_RETRY_CODES
     )
+    # Give up a single attempt after 60 seconds (value in milliseconds).
     options = genai_types.HttpOptions(
         timeout=GEMINI_TIMEOUT_MS, retry_options=retry
     )
@@ -170,6 +165,7 @@ def request_quiz_text(prompt):
         response = client.models.generate_content(
             model=GEMINI_MODEL, contents=prompt
         )
+    # APIError: Gemini answered with an error, HTTPError: network/timeout.
     except (genai_errors.APIError, httpx.HTTPError) as error:
         raise QuizGenerationError('Gemini request failed.') from error
     if not response.text:

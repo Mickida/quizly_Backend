@@ -22,13 +22,12 @@ from auth_app.utils import (
     set_token_cookie,
 )
 
-# Errors meaning the refresh cookie is missing, invalid, blacklisted or
-# belongs to a user who was deleted or deactivated.
+# Every error that can happen while refreshing ends in a 401:
 REFRESH_ERRORS = (
-    TokenError,
-    ValidationError,
-    AuthenticationFailed,
-    ObjectDoesNotExist,
+    TokenError,            # token is broken, expired or blacklisted
+    ValidationError,       # refresh cookie is missing
+    AuthenticationFailed,  # user of the token is deactivated
+    ObjectDoesNotExist,    # user of the token was deleted
 )
 
 
